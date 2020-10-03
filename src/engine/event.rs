@@ -25,11 +25,13 @@ pub(super) fn setup_events(canvas: &HtmlCanvasElement, event_queue: Rc<RefCell<V
 
     canvas.listen_forever("contextmenu", |e: web_sys::Event| e.prevent_default());
 
+    let ratio = super::window().device_pixel_ratio();
+
     let moved_event_queue = event_queue.clone();
     canvas.listen_forever("mouseup", move |e: MouseEvent| {
         moved_event_queue.borrow_mut().push_back(Event::MouseUp {
-            x: e.client_x(),
-            y: e.client_y(),
+            x: (e.client_x() as f64 * ratio) as i32,
+            y: (e.client_y() as f64 * ratio) as i32,
             button: match MouseButton::from_code(e.button()) {
                 Some(b) => b,
                 _ => return,
@@ -40,8 +42,8 @@ pub(super) fn setup_events(canvas: &HtmlCanvasElement, event_queue: Rc<RefCell<V
     let moved_event_queue = event_queue.clone();
     canvas.listen_forever("mousedown", move |e: MouseEvent| {
         moved_event_queue.borrow_mut().push_back(Event::MouseDown {
-            x: e.client_x(),
-            y: e.client_y(),
+            x: (e.client_x() as f64 * ratio) as i32,
+            y: (e.client_y() as f64 * ratio) as i32,
             button: match MouseButton::from_code(e.button()) {
                 Some(b) => b,
                 _ => return,
@@ -52,8 +54,8 @@ pub(super) fn setup_events(canvas: &HtmlCanvasElement, event_queue: Rc<RefCell<V
     let moved_event_queue = event_queue.clone();
     canvas.listen_forever("mousemove", move |e: MouseEvent| {
         moved_event_queue.borrow_mut().push_back(Event::MouseMove {
-            x: e.client_x(),
-            y: e.client_y(),
+            x: (e.client_x() as f64 * ratio) as i32,
+            y: (e.client_y() as f64 * ratio) as i32,
             buttons: MouseButton::from_bitmap(e.buttons()),
         });
     });
@@ -89,7 +91,7 @@ pub(super) fn setup_events(canvas: &HtmlCanvasElement, event_queue: Rc<RefCell<V
     });
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum MouseButton {
     Left,
     Middle,

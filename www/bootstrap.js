@@ -13,4 +13,5 @@ import("./index.js")
       }
       document.body.textContent = '';
       document.body.appendChild(p);
+      console.error(e);
   });

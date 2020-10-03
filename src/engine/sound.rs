@@ -104,6 +104,10 @@ impl Music {
         let _ = self.audio.play().unwrap();
     }
 
+    pub fn set_volume(&self, volume: f64) {
+        self.audio.set_volume(volume);
+    }
+
     pub fn stop(&self) {
         self.audio.pause().unwrap();
         self.audio.set_current_time(0.0);
