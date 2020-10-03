@@ -1,37 +1,32 @@
-use web_sys::{HtmlCanvasElement, MouseEvent, EventTarget};
-use std::rc::Rc;
 use std::cell::RefCell;
 use std::collections::VecDeque;
+use std::rc::Rc;
+
 use wasm_bindgen::{*, prelude::*};
+use web_sys::{EventTarget, HtmlCanvasElement, MouseEvent};
+use std::ops::Deref;
 
-trait EventListen {
-
-    fn listen<E: JsCast>(&self, event_type: &str, f: impl FnMut(E) + 'static);
+trait ListenForever {
+    fn listen_forever<E: JsCast>(&self, event_type: &str, f: impl FnMut(E) + 'static);
 }
 
-impl<T: AsRef<EventTarget>> EventListen for T {
-    fn listen<E: JsCast>(&self, event_type: &str, mut f: impl FnMut(E) + 'static)  {
-        let closure = Closure::wrap(Box::new(move |e: web_sys::Event| {
-            e.prevent_default();
-            f(e.dyn_into().unwrap());
-        }) as Box<dyn FnMut(web_sys::Event)>);
-        self.as_ref().add_event_listener_with_callback(event_type, closure.as_ref().unchecked_ref()).unwrap();
+impl<T: Deref<Target=EventTarget>> ListenForever for T {
+    fn listen_forever<E: JsCast>(&self, event_type: &str, mut f: impl FnMut(E) + 'static) {
+        let closure =
+            Closure::wrap(Box::new(move |e: web_sys::Event|
+                f(e.dyn_into().unwrap())) as Box<dyn FnMut(web_sys::Event)>);
+
+        self.add_event_listener_with_callback(event_type, closure.as_ref().unchecked_ref()).unwrap();
         closure.forget();
     }
 }
 
 pub(super) fn setup_events(canvas: &HtmlCanvasElement, event_queue: Rc<RefCell<VecDeque<Event>>>) {
-    let on_contextmenu =
-        Closure::wrap(Box::new(move |e: web_sys::Event| {
-            e.prevent_default();
-            JsValue::FALSE
-        }) as Box<dyn FnMut(web_sys::Event) -> JsValue>);
-    canvas.add_event_listener_with_callback("contextmenu", on_contextmenu.as_ref().unchecked_ref())
-        .unwrap();
-    on_contextmenu.forget();
+
+    canvas.listen_forever("contextmenu", |e: web_sys::Event| e.prevent_default());
 
     let moved_event_queue = event_queue.clone();
-    canvas.listen("mouseup", move |e: MouseEvent| {
+    canvas.listen_forever("mouseup", move |e: MouseEvent| {
         moved_event_queue.borrow_mut().push_back(Event::MouseUp {
             x: e.client_x(),
             y: e.client_y(),
@@ -43,7 +38,7 @@ pub(super) fn setup_events(canvas: &HtmlCanvasElement, event_queue: Rc<RefCell<V
     });
 
     let moved_event_queue = event_queue.clone();
-    canvas.listen("mousedown", move |e: MouseEvent| {
+    canvas.listen_forever("mousedown", move |e: MouseEvent| {
         moved_event_queue.borrow_mut().push_back(Event::MouseDown {
             x: e.client_x(),
             y: e.client_y(),
@@ -55,7 +50,7 @@ pub(super) fn setup_events(canvas: &HtmlCanvasElement, event_queue: Rc<RefCell<V
     });
 
     let moved_event_queue = event_queue.clone();
-    canvas.listen("mousemove", move |e: MouseEvent| {
+    canvas.listen_forever("mousemove", move |e: MouseEvent| {
         moved_event_queue.borrow_mut().push_back(Event::MouseMove {
             x: e.client_x(),
             y: e.client_y(),
@@ -76,7 +71,7 @@ pub(super) fn setup_events(canvas: &HtmlCanvasElement, event_queue: Rc<RefCell<V
     let document = super::document();
 
     let moved_event_queue = event_queue.clone();
-    document.listen("keydown", move |e: web_sys::KeyboardEvent| {
+    document.listen_forever("keydown", move |e: web_sys::KeyboardEvent| {
         moved_event_queue.borrow_mut().push_back(Event::KeyDown {
             code: e.key_code(),
             key: e.key(),
@@ -85,7 +80,7 @@ pub(super) fn setup_events(canvas: &HtmlCanvasElement, event_queue: Rc<RefCell<V
     });
 
     let moved_event_queue = event_queue;//.clone();
-    document.listen("keyup", move |e: web_sys::KeyboardEvent| {
+    document.listen_forever("keyup", move |e: web_sys::KeyboardEvent| {
         moved_event_queue.borrow_mut().push_back(Event::KeyUp {
             code: e.key_code(),
             key: e.key(),
@@ -104,7 +99,6 @@ pub enum MouseButton {
 }
 
 impl MouseButton {
-
     pub fn from_code(code: i16) -> Option<MouseButton> {
         match code {
             0 => Some(MouseButton::Left),

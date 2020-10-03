@@ -8,17 +8,17 @@ use std::{
 };
 
 use wasm_bindgen::{*, prelude::*};
-use web_sys::{CanvasRenderingContext2d, Document, HtmlCanvasElement, HtmlElement, Window};
+use web_sys::{CanvasRenderingContext2d, Document, HtmlCanvasElement, HtmlElement, Window, AudioContext};
 
 use event::Event;
 
 use crate::engine::sprite::Spritesheet;
-use crate::engine::sound::Sound;
+use crate::engine::sound::{Music, Sound};
 
 pub mod event;
 pub mod sprite;
 pub mod sound;
-pub mod panic;
+pub mod util;
 
 fn window() -> Window {
     web_sys::window().expect("No window")
@@ -66,6 +66,8 @@ fn setup_canvas(event_queue: Rc<RefCell<VecDeque<Event>>>) -> CanvasRenderingCon
 
 pub struct GameUpdate<'a> {
     dt: f64,
+    surface: &'a CanvasRenderingContext2d,
+    audio_context: &'a AudioContext,
     events: Drain<'a, Event>,
 }
 
@@ -83,8 +85,12 @@ fn run<G: Game + 'static>() {
     let event_queue = Rc::new(RefCell::new(VecDeque::new()));
 
     let surface = setup_canvas(event_queue.clone());
+    let audio_context = AudioContext::new().unwrap();
 
-    let mut game = G::load(Resources { surface: surface.clone() });
+    let mut game = G::load(Resources {
+        surface: surface.clone(),
+        audio_context: audio_context.clone(),
+    });
 
     let mut last_time: f64 = js_sys::Date::now();
 
@@ -107,6 +113,8 @@ fn run<G: Game + 'static>() {
         let now = js_sys::Date::now();
         game.update(GameUpdate {
             dt: (now - last_time) / 1e3,
+            surface: &surface,
+            audio_context: &audio_context,
             events: event_queue.borrow_mut().drain(..),
         });
         last_time = now;
@@ -119,6 +127,7 @@ fn run<G: Game + 'static>() {
 
 pub struct Resources {
     surface: CanvasRenderingContext2d,
+    audio_context: AudioContext,
 }
 
 impl Resources {
@@ -127,7 +136,11 @@ impl Resources {
     }
 
     pub fn load_sound(&self, url: &str) -> Sound {
-        Sound::load(url)
+        Sound::load(self.audio_context.clone(), url)
+    }
+
+    pub fn load_music(&self, url: &str) -> Music {
+        Music::load(url)
     }
 }
 
