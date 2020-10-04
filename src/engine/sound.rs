@@ -6,7 +6,7 @@ use web_sys::{AudioBuffer, AudioBufferSourceNode, AudioContext, HtmlAudioElement
 
 use super::util::PromiseGlue;
 
-#[wasm_bindgen(inline_js="\
+#[wasm_bindgen(inline_js = "\
 export function load_audio_buffer(ctx, url) {
     return fetch(url)
       .then(res => res.arrayBuffer())
@@ -26,6 +26,7 @@ pub struct Sound {
     context: AudioContext,
     playing: Rc<RefCell<Option<AudioBufferSourceNode>>>,
     buffer: Rc<RefCell<Option<AudioBuffer>>>,
+    volume: f32,
     looped: bool,
 }
 
@@ -42,7 +43,8 @@ impl Sound {
         Sound {
             context,
             buffer,
-            playing: Rc::new(RefCell::new(None)),
+            playing: Default::default(),
+            volume: 1.0,
             looped: false,
         }
     }
@@ -52,11 +54,23 @@ impl Sound {
         self
     }
 
-    pub fn play(&mut self) {
+    pub fn with_volume(mut self, volume: f32) -> Self {
+        self.volume = volume;
+        self
+    }
+
+    pub fn play(&self) {
         if let Some(buffer) = self.buffer.borrow().as_ref() {
             let source = self.context.create_buffer_source().unwrap();
             source.set_buffer(Some(buffer));
-            source.connect_with_audio_node(&self.context.destination()).unwrap();
+
+            let destination = &self.context.destination();
+
+            let gain = self.context.create_gain().unwrap();
+            gain.gain().set_value(self.volume);
+            gain.connect_with_audio_node(destination).unwrap();
+            source.connect_with_audio_node(&gain).unwrap();
+
             source.set_loop(self.looped);
             source.start().unwrap();
 
@@ -67,6 +81,10 @@ impl Sound {
 
             *self.playing.borrow_mut() = Some(source);
         }
+    }
+
+    pub fn set_volume(&mut self, volume: f32) {
+        self.volume = volume;
     }
 
     pub fn playing(&self) -> bool {

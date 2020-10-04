@@ -1,9 +1,10 @@
 #!/bin/bash
 
-rm -rf dist
-
 wasm-pack build
 cd www || exit
+
+rm -rf dist
+
 npm run build
 
 cd dist || exit

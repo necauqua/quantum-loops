@@ -1,35 +1,35 @@
 use std::{
     cell::RefCell,
-    collections::{
-        vec_deque::Drain,
-        VecDeque,
-    },
+    collections::VecDeque,
     rc::Rc,
 };
-
+use nalgebra::Point2;
 use wasm_bindgen::{*, prelude::*};
 use web_sys::{AudioContext, CanvasRenderingContext2d, Document, HtmlCanvasElement, HtmlElement, Window};
 
 use event::Event;
-
-use crate::engine::sound::{Music, Sound};
-use crate::engine::sprite::Spritesheet;
+use sound::{Music, Sound};
+use sprite::Spritesheet;
 
 pub mod event;
 pub mod sprite;
 pub mod sound;
 pub mod util;
 
-fn window() -> Window {
+pub fn window() -> Window {
     web_sys::window().expect("No window")
 }
 
-fn document() -> Document {
+pub fn document() -> Document {
     window().document().expect("No document")
 }
 
-fn body() -> HtmlElement {
+pub fn body() -> HtmlElement {
     document().body().expect("No document.body")
+}
+
+pub fn time() -> f64 {
+    js_sys::Date::now() / 1e3
 }
 
 fn setup_canvas(event_queue: Rc<RefCell<VecDeque<Event>>>) -> CanvasRenderingContext2d {
@@ -92,8 +92,7 @@ impl Iterator for Events {
 pub struct GameUpdate<'a, G: Game> {
     game: &'a mut G,
     delta_time: f64,
-    size: (f64, f64),
-    events: Events,
+    size: Point2<f32>,
     surface: &'a CanvasRenderingContext2d,
     audio_context: &'a AudioContext,
 }
@@ -106,7 +105,11 @@ pub enum StateTransition<G> {
 }
 
 impl<'a, G: Game> GameUpdate<'a, G> {
-    pub fn game(&mut self) -> &mut G {
+    pub fn game(&self) -> &G {
+        self.game
+    }
+
+    pub fn game_mut(&mut self) -> &mut G {
         self.game
     }
 
@@ -114,12 +117,8 @@ impl<'a, G: Game> GameUpdate<'a, G> {
         self.delta_time
     }
 
-    pub fn size(&self) -> (f64, f64) {
+    pub fn size(&self) -> Point2<f32> {
         self.size
-    }
-
-    pub fn events(&self) -> Events {
-        self.events.clone()
     }
 
     pub fn surface(&self) -> &CanvasRenderingContext2d {
@@ -148,13 +147,12 @@ fn run<G: Game + 'static>() {
     state_stack[0].on_mounted(&mut GameUpdate {
         game: &mut game,
         delta_time: 0.0,
-        size: (canvas.width() as f64, canvas.height() as f64),
+        size: [canvas.width() as f32, canvas.height() as f32].into(),
         surface: &surface,
         audio_context: &audio_context,
-        events: Events(event_queue.clone()),
     });
 
-    let mut last_time: f64 = js_sys::Date::now();
+    let mut last_time = time();
 
     fn request_animation_frame(window: &Window, f: &Closure<dyn FnMut()>) {
         window
@@ -169,24 +167,36 @@ fn run<G: Game + 'static>() {
 
     *rc1.borrow_mut() = Some(Closure::wrap(Box::new(move || {
         surface.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0).unwrap();
-        let width = canvas.width() as f64;
-        let height = canvas.height() as f64;
+        let width = canvas.width() as f32;
+        let height = canvas.height() as f32;
 
-        let now = js_sys::Date::now();
+        let now = time();
 
         let mut context = GameUpdate {
             game: &mut game,
-            delta_time: (now - last_time) / 1e3,
-            size: (width, height),
+            delta_time: now - last_time,
+            size: [width, height].into(),
             surface: &surface,
             audio_context: &audio_context,
-            events: Events(event_queue.clone()),
         };
-        let transition = state_stack[0].update(&mut context);
+
+        let top_state = &mut state_stack[0];
+
+        let transition = loop {
+            if let Some(event) = event_queue.borrow_mut().pop_back() {
+                match top_state.on_event(event, &mut context) {
+                    StateTransition::None => (),
+                    x => break x,
+                }
+            } else {
+                break top_state.update(&mut context);
+            }
+        };
+
         match transition {
             StateTransition::Set(state) => {
-                state_stack[0] = state;
-                state_stack[0].on_mounted(&mut context);
+                *top_state = state;
+                top_state.on_mounted(&mut context);
             }
             StateTransition::Push(state) => {
                 state_stack.push_front(state);
@@ -228,8 +238,14 @@ impl Resources {
     }
 }
 
+// copying Amethyst so hard accidentaly
+// well their state design is pretty good I guess
 pub trait GameState<G: Game> where Self: 'static {
     fn on_mounted(&mut self, _context: &mut GameUpdate<G>) {}
+
+    fn on_event(&mut self, _event: Event, _context: &mut GameUpdate<G>) -> StateTransition<G> {
+        StateTransition::None
+    }
 
     fn update(&mut self, _context: &mut GameUpdate<G>) -> StateTransition<G> {
         StateTransition::None
@@ -240,7 +256,7 @@ pub trait Game where Self: Sized + 'static {
     fn load(resources: Resources) -> (Self, Box<dyn GameState<Self>>);
 }
 
-pub trait RunGame: Game + Sized + private::Sealed {
+pub trait GameRun: Game + Sized + private::Sealed {
     fn run() {
         run::<Self>()
     }
@@ -252,4 +268,4 @@ mod private {
 
 impl<G: Game + Sized> private::Sealed for G {}
 
-impl<G: Game + Sized + private::Sealed> RunGame for G {}
+impl<G: Game + Sized + private::Sealed> GameRun for G {}

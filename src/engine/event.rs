@@ -1,10 +1,11 @@
 use std::cell::RefCell;
 use std::collections::VecDeque;
+use std::ops::Deref;
 use std::rc::Rc;
 
+use nalgebra::{Point2, Vector2};
 use wasm_bindgen::{*, prelude::*};
-use web_sys::{EventTarget, HtmlCanvasElement, MouseEvent};
-use std::ops::Deref;
+use web_sys::{EventTarget, HtmlCanvasElement, MouseEvent, WheelEvent};
 
 trait ListenForever {
     fn listen_forever<E: JsCast>(&self, event_type: &str, f: impl FnMut(E) + 'static);
@@ -22,16 +23,14 @@ impl<T: Deref<Target=EventTarget>> ListenForever for T {
 }
 
 pub(super) fn setup_events(canvas: &HtmlCanvasElement, event_queue: Rc<RefCell<VecDeque<Event>>>) {
-
     canvas.listen_forever("contextmenu", |e: web_sys::Event| e.prevent_default());
 
-    let ratio = super::window().device_pixel_ratio();
+    let ratio = super::window().device_pixel_ratio() as f32;
 
     let moved_event_queue = event_queue.clone();
     canvas.listen_forever("mouseup", move |e: MouseEvent| {
         moved_event_queue.borrow_mut().push_back(Event::MouseUp {
-            x: (e.client_x() as f64 * ratio) as i32,
-            y: (e.client_y() as f64 * ratio) as i32,
+            pos: [(e.client_x() as f32 * ratio), (e.client_y() as f32 * ratio)].into(),
             button: match MouseButton::from_code(e.button()) {
                 Some(b) => b,
                 _ => return,
@@ -42,8 +41,7 @@ pub(super) fn setup_events(canvas: &HtmlCanvasElement, event_queue: Rc<RefCell<V
     let moved_event_queue = event_queue.clone();
     canvas.listen_forever("mousedown", move |e: MouseEvent| {
         moved_event_queue.borrow_mut().push_back(Event::MouseDown {
-            x: (e.client_x() as f64 * ratio) as i32,
-            y: (e.client_y() as f64 * ratio) as i32,
+            pos: [(e.client_x() as f32 * ratio), (e.client_y() as f32 * ratio)].into(),
             button: match MouseButton::from_code(e.button()) {
                 Some(b) => b,
                 _ => return,
@@ -54,8 +52,16 @@ pub(super) fn setup_events(canvas: &HtmlCanvasElement, event_queue: Rc<RefCell<V
     let moved_event_queue = event_queue.clone();
     canvas.listen_forever("mousemove", move |e: MouseEvent| {
         moved_event_queue.borrow_mut().push_back(Event::MouseMove {
-            x: (e.client_x() as f64 * ratio) as i32,
-            y: (e.client_y() as f64 * ratio) as i32,
+            pos: [(e.client_x() as f32 * ratio), (e.client_y() as f32 * ratio)].into(),
+            buttons: MouseButton::from_bitmap(e.buttons()),
+        });
+    });
+
+    let moved_event_queue = event_queue.clone();
+    canvas.listen_forever("wheel", move |e: WheelEvent| {
+        moved_event_queue.borrow_mut().push_back(Event::MouseWheel {
+            pos: [(e.client_x() as f32 * ratio), (e.client_y() as f32 * ratio)].into(),
+            delta: [e.delta_x() as f32, e.delta_y() as f32].into(),
             buttons: MouseButton::from_bitmap(e.buttons()),
         });
     });
@@ -144,9 +150,14 @@ pub struct KeyMeta {
 
 #[derive(Debug)]
 pub enum Event {
-    MouseDown { x: i32, y: i32, button: MouseButton },
-    MouseMove { x: i32, y: i32, buttons: Vec<MouseButton> },
-    MouseUp { x: i32, y: i32, button: MouseButton },
+    MouseDown { pos: Point2<f32>, button: MouseButton },
+    MouseUp { pos: Point2<f32>, button: MouseButton },
+    MouseMove { pos: Point2<f32>, buttons: Vec<MouseButton> },
+    MouseWheel {
+        pos: Point2<f32>,
+        buttons: Vec<MouseButton>,
+        delta: Vector2<f32>,
+    },
     KeyDown {
         code: u32,
         key: String,

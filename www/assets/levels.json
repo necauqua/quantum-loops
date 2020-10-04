@@ -1,0 +1,40 @@
+[
+  {
+    "name": "Double Jump",
+    "energy": 100,
+    "rings": [
+      {
+        "radius": 0.15,
+        "base_energy": 15
+      },
+      {
+        "radius": 0.25,
+        "color": "purple",
+        "base_energy": 10
+      }
+    ]
+  },
+  {
+    "name": "Here and there",
+    "energy": 100,
+    "rings": [
+      {
+        "radius": 0.15,
+        "base_energy": 20
+      },
+      {
+        "radius": 0.25,
+        "offset": [10, -20],
+        "color": "gray",
+        "base_energy": 10
+      },
+      {
+        "radius": 0.4,
+        "color": "lightblue",
+        "width": 4,
+        "restore_time": 1,
+        "base_energy": 15
+      }
+    ]
+  }
+]

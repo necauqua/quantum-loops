@@ -16,9 +16,18 @@ crate-type = ['cdylib']
 log = '0.4'
 wasm-logger = '0.2'
 
+serde = { version = '1.0', features = ['derive'] }
+serde_json = '1.0'
+
+lazy_static = '1.4'
+
+nalgebra = { version = '0.22', features = ['serde-serialize'] }
+
 noise = '0.6'
 
-wasm-bindgen = '0.2'
+wasm-bindgen = { version = '0.2', features = ['serde-serialize'] }
+wasm-bindgen-futures = '0.4'
+
 js-sys = '0.3'
 
 [dependencies.web-sys]
@@ -29,14 +38,18 @@ features = [
     'Window',
     'Element',
     'Node',
+    'Response',
     'Event',
     'MouseEvent',
+    'WheelEvent',
     'KeyboardEvent',
     'EventTarget',
     'HtmlElement',
     'AudioContext',
     'AudioBuffer',
     'AudioNode',
+    'GainNode',
+    'AudioParam',
     'AudioDestinationNode',
     'AudioBufferSourceNode',
     'HtmlImageElement',
@@ -44,4 +57,6 @@ features = [
     'HtmlMediaElement',
     'HtmlCanvasElement',
     'CanvasRenderingContext2d',
+    'TextMetrics',
+    'CssStyleDeclaration',
 ]
