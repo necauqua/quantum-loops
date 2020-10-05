@@ -15,17 +15,33 @@
     ]
   },
   {
+    "name": "THICK",
+    "energy": 205,
+    "rings": [
+      {
+        "radius": 0.10,
+        "width": 25,
+        "color": "#4f2b59",
+        "base_energy": 200
+      }
+    ]
+  },
+  {
     "name": "Here and there",
-    "energy": 100,
+    "energy": 120,
     "rings": [
       {
         "radius": 0.15,
-        "base_energy": 20
+        "base_energy": 20,
+        "restore_time": 10
       },
       {
         "radius": 0.25,
-        "offset": [10, -20],
-        "color": "gray",
+        "offset": [
+          0.02,
+          -0.04
+        ],
+        "color": "green",
         "base_energy": 10
       },
       {
@@ -34,6 +50,116 @@
         "width": 4,
         "restore_time": 1,
         "base_energy": 15
+      }
+    ]
+  },
+  {
+    "name": "RGB",
+    "energy": 250,
+    "rings": [
+      {
+        "radius": 0.125,
+        "color": "red",
+        "offset": [0.25, 0.0],
+        "base_energy": 57.2,
+        "restore_time": 5
+      },
+      {
+        "radius": 0.125,
+        "color": "green",
+        "offset": [-0.125, 0.21650635094610968],
+        "base_energy": 53.95,
+        "restore_time": 5
+      },
+      {
+        "radius": 0.125,
+        "color": "blue",
+        "offset": [-0.125, -0.2165063509461096],
+        "base_energy": 43,
+        "restore_time": 5
+      },
+      {
+        "radius": 0.25,
+        "base_energy": 30,
+        "restore_time": 10,
+        "color": "white"
+      }
+    ]
+  },
+  {
+    "name": "The REAL aim trainer",
+    "energy": 500,
+    "rings": [
+      {
+        "radius": 0.005,
+        "offset": [ -0.44832850166720906 , -0.41298507591804445 ],
+        "base_energy": 60,
+        "restore_time": 5
+      },
+      {
+        "radius": 0.005,
+        "offset": [ 0.4074574319719 , 0.2530864763668884 ],
+        "base_energy": 60,
+        "restore_time": 5
+      },
+      {
+        "radius": 0.005,
+        "offset": [ 0.40809086955279267 , 0.3115169511324731 ],
+        "base_energy": 60,
+        "restore_time": 5
+      },
+      {
+        "radius": 0.005,
+        "offset": [ -0.3771381306668682 , 0.18202557616331524 ],
+        "base_energy": 60,
+        "restore_time": 5
+      },
+      {
+        "radius": 0.005,
+        "offset": [ -0.20210451744786376 , 0.08904841203473615 ],
+        "base_energy": 60,
+        "restore_time": 5
+      }
+    ]
+  },
+  {
+    "name": "Recycling (your soul)",
+    "energy": 400,
+    "rings": [
+      {
+        "radius": 0.15,
+        "base_energy": 35,
+        "color": "#79b551",
+        "width": 4,
+        "restore_time": 1.0
+      },
+      {
+        "radius": 0.2,
+        "base_energy": 30,
+        "color": "#79b551",
+        "width": 3,
+        "restore_time": 3.0
+      },
+      {
+        "radius": 0.25,
+        "base_energy": 25,
+        "color": "#79b551",
+        "restore_time": 10.0,
+        "width": 2
+      },
+      {
+        "radius": 0.3,
+        "base_energy": 20,
+        "color": "#79b551",
+        "restore_time": 10.0,
+        "width": 2
+      },
+      {
+        "radius": 0.35,
+        "base_energy": 15,
+        "color": "#79b551",
+        "restore_time": 5.0,
+        "width": 2
       }
     ]
   }

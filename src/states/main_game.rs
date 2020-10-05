@@ -1,26 +1,24 @@
 use nalgebra::Point2;
 use noise::{NoiseFn, Perlin};
 
-use crate::{
-    engine::{
-        self,
-        event::{Event, MouseButton},
-        GameState,
-        GameUpdate,
-        StateTransition,
-        util::SmoothChange,
-    },
-    level::GameLevel,
-    QuantumLoops,
-    states::main_menu::MainMenuState,
-    states::pause::PauseState,
-    TAU,
-};
-use crate::states::game_over::GameOverState;
+use crate::{engine::{
+    self,
+    event::{Event, MouseButton},
+    GameState,
+    Context,
+    StateTransition,
+    util::SmoothChange,
+}, level::GameLevel, QuantumLoops, TAU, sounds_enabled};
+use crate::states::game_lost::GameLostState;
+use crate::states::game_won::GameWonState;
+use crate::engine::util::RemConversions;
+use std::f32::consts::FRAC_PI_4;
+use crate::states::pause::PauseState;
 
 pub const BG_COLOR: &str = "#ebf2f5";
 pub const BG_LINE_COLOR: &str = "#d2e0fa";
 pub const TEXT_COLOR: &str = "#119ad9";
+pub const DISABLED_TEXT_COLOR: &str = "#77868c";
 pub const HOVERED_TEXT_COLOR: &str = "#0a5a80";
 pub const ENERGY_BAR_COLOR: &str = "#93d6f5";
 
@@ -34,16 +32,26 @@ pub struct Disruption {
 }
 
 #[derive(Debug)]
+enum GameStatus {
+    Playing,
+    Paused,
+    Won { score: f32 },
+    Lost,
+}
+
+#[derive(Debug)]
 pub struct MainGameState {
-    game_level: GameLevel,
+    level: Option<GameLevel>,
+    level_idx: usize,
     current_ring: usize,
     particle_angle: f32,
+    game_status: GameStatus,
     energy: SmoothChange,
     disruption: Option<Disruption>,
     noise: Perlin,
 }
 
-pub fn draw_background(context: &GameUpdate<QuantumLoops>, offset: Point2<f32>) {
+pub fn draw_background(context: &Context<QuantumLoops>, offset: Point2<f32>) {
     let surface = context.surface();
     let size = context.size();
 
@@ -71,24 +79,44 @@ pub fn draw_background(context: &GameUpdate<QuantumLoops>, offset: Point2<f32>) 
     }
 }
 
-impl MainGameState {
-    pub fn new(game_level: GameLevel) -> Self {
-        let energy = game_level.energy;
-        Self {
-            game_level,
-            current_ring: 0,
-            energy: SmoothChange::new(energy, 2.0),
-            disruption: None,
-            particle_angle: 0.0,
-            noise: Perlin::new(),
-        }
-    }
-}
-
 const POWER_USED_PER_PIXEL_PER_SECOND: f32 = 1.0;
 
 impl MainGameState {
-    fn handle_disruption(&mut self, pos: Point2<f32>, context: &mut GameUpdate<QuantumLoops>) {
+    pub fn new(level_idx: usize) -> Self {
+        Self {
+            level: None,
+            level_idx,
+            current_ring: 0,
+            energy: SmoothChange::new(100.0, 50.0),
+            disruption: None,
+            particle_angle: 0.0,
+            game_status: GameStatus::Playing,
+            noise: Perlin::new(),
+        }
+    }
+
+    pub fn resume(&mut self) {
+        self.game_status = GameStatus::Playing;
+    }
+
+    pub fn level_idx(&self) -> usize {
+        self.level_idx
+    }
+
+    fn check_level(&mut self, context: &mut Context<QuantumLoops>) -> Option<StateTransition<QuantumLoops>> {
+        if self.level.is_some() {
+            return None
+        }
+        let level = context.game_mut().get_level(self.level_idx);
+        if level.is_none() {
+            return Some(StateTransition::None);
+        }
+        self.energy.full_set(level.as_ref().unwrap().energy);
+        self.level = level;
+        None
+    }
+
+    fn handle_disruption(&mut self, pos: Point2<f32>, context: &mut Context<QuantumLoops>) {
         if let Some(mut d) = self.disruption.take() {
             d.end = pos;
 
@@ -97,7 +125,8 @@ impl MainGameState {
             let dist = d.start.coords.metric_distance(&d.end.coords);
             let time = (engine::time() - d.start_time) as f32;
 
-            let mut intersections = self.game_level.rings.iter_mut()
+            let level = self.level.as_mut().unwrap();
+            let mut intersections = level.rings.iter_mut()
                 .enumerate()
                 .filter(|(_, r)|
                     r.disrupted_time <= 1.0 && r.intersects(center, &d))
@@ -122,9 +151,9 @@ impl MainGameState {
         }
     }
 
-    fn update_particle_level(&mut self, context: &mut GameUpdate<QuantumLoops>, play_sound: bool) -> bool {
+    fn update_particle_level(&mut self, context: &mut Context<QuantumLoops>, play_sound: bool) -> bool {
         let jump_to =
-            self.game_level.rings.iter()
+            self.level.as_mut().unwrap().rings.iter()
                 .enumerate()
                 .filter(|(_, r)| r.disrupted_time <= 0.0)
                 .max_by(|(_, r1), (_, r2)|
@@ -135,7 +164,7 @@ impl MainGameState {
             Some(idx) => {
                 if self.current_ring != idx {
                     self.current_ring = idx;
-                    if play_sound {
+                    if play_sound && sounds_enabled() {
                         context.game().sounds.jump.play();
                     }
                 }
@@ -147,14 +176,23 @@ impl MainGameState {
 }
 
 impl GameState<QuantumLoops> for MainGameState {
-    fn on_mounted(&mut self, context: &mut GameUpdate<QuantumLoops>) {
-        self.update_particle_level(context, false);
+    fn on_pushed(&mut self, context: &mut Context<QuantumLoops>) {
+        if self.check_level(context).is_some() {
+            self.update_particle_level(context, false);
+        }
     }
 
-    fn on_event(&mut self, event: Event, context: &mut GameUpdate<QuantumLoops>) -> StateTransition<QuantumLoops> {
+    fn on_event(&mut self, event: Event, context: &mut Context<QuantumLoops>) -> StateTransition<QuantumLoops> {
+        if let Some(transition) = self.check_level(context) {
+            return transition;
+        }
         match event {
             Event::KeyDown { code: 27, .. } => {
-                return StateTransition::Push(Box::new(PauseState::new()));
+                self.game_status = GameStatus::Paused;
+                return StateTransition::Pop;
+            }
+            Event::KeyDown { code: 82, .. } => {
+                return StateTransition::Set(Box::new(MainGameState::new(self.level_idx)));
             }
             Event::MouseDown { pos, button: MouseButton::Left } => {
                 self.disruption = Some(Disruption {
@@ -180,22 +218,9 @@ impl GameState<QuantumLoops> for MainGameState {
         StateTransition::None
     }
 
-
-    fn update(&mut self, context: &mut GameUpdate<QuantumLoops>) -> StateTransition<QuantumLoops> {
-        self.energy.update(context.delta_time());
-
-        if self.energy.get() <= 0.0 {
-            context.game().sounds.lose.play();
-            let state = GameOverState::new("YOU LOST".into(), "red".into(), self.game_level.clone());
-            return StateTransition::Set(Box::new(state));
-        }
-
-        self.particle_angle += (TAU * context.delta_time()) as f32;
-
-        if self.update_particle_level(context, true) {
-            context.game().sounds.win.play();
-            let state = GameOverState::new("YOU WON".into(), TEXT_COLOR.into(), self.game_level.clone());
-            return StateTransition::Set(Box::new(state));
+    fn on_update(&mut self, context: &mut Context<QuantumLoops>) -> StateTransition<QuantumLoops> {
+        if let Some(transition) = self.check_level(context) {
+            return transition;
         }
 
         // render:
@@ -207,24 +232,25 @@ impl GameState<QuantumLoops> for MainGameState {
 
         let surface = context.surface();
 
-        let w = size.x * self.energy.get_interp() / self.game_level.energy;
+        let energy = self.energy.get_interp();
+        let w = size.x * energy / self.level.as_mut().unwrap().energy;
         surface.set_fill_style(&ENERGY_BAR_COLOR.into());
-        surface.fill_rect(0.0, 0.0, w as f64, 15.0);
+        surface.fill_rect(0.0, 0.0, w as f64, 1.0.rem_to_pixels());
 
-        // the dot idk
-        surface.set_fill_style(&"black".into());
-        surface.begin_path();
-        surface.arc(center.x as f64, center.y as f64, 2.5, 0.0, TAU).unwrap();
-        surface.fill();
+        surface.set_fill_style(&TEXT_COLOR.into());
+        surface.set_font("0.9rem monospace");
+        surface.fill_text(&format!("{:.2}", energy.max(0.0)),
+                          1.6.rem_to_pixels(), 1.6.rem_to_pixels()).unwrap();
 
         let min_dim = size.coords.min();
 
         let mut jiggling = 0.0;
 
-        for (idx, ring) in self.game_level.rings.iter_mut().enumerate() {
+        let level = self.level.as_mut().unwrap();
+        for (idx, ring) in level.rings.iter_mut().enumerate() {
             surface.set_stroke_style(&(&ring.color).into());
 
-            let mut pos = center + ring.offset.coords;
+            let mut pos = center + ring.offset.coords * min_dim;
 
             if ring.disrupted_time >= 0.0 && ring.disrupted_time <= JIGGLE_TIME {
                 let offset = self.particle_angle as f64 * 5.0;
@@ -233,33 +259,45 @@ impl GameState<QuantumLoops> for MainGameState {
                 jiggling = ring.disrupted_time;
             }
 
+            let radius = min_dim * ring.radius;
+
             surface.set_global_alpha((1.0 - ring.disrupted_time / ring.restore_time) as f64);
 
             surface.set_line_width(ring.width as f64);
             surface.begin_path();
-            surface.arc(pos.x as f64, pos.y as f64, (min_dim * ring.radius) as f64, 0.0, TAU).unwrap();
+            surface.arc(pos.x as f64, pos.y as f64, (radius) as f64, 0.0, TAU).unwrap();
             surface.stroke();
 
             surface.set_global_alpha(1.0);
 
-            if ring.disrupted_time >= 0.0 {
-                ring.disrupted_time -= context.delta_time() as f32;
-            }
+            let tpx = pos.x + (radius + 1.5.rem_to_pixels()) * FRAC_PI_4.cos();
+            let tpy = pos.y + (radius + 1.5.rem_to_pixels()) * FRAC_PI_4.sin();
 
-            if idx == self.current_ring {
-                let px = pos.x + min_dim * ring.radius * self.particle_angle.cos();
-                let py = pos.y + min_dim * ring.radius * self.particle_angle.sin();
+            surface.set_fill_style(&TEXT_COLOR.into());
+            surface.set_font("0.9rem monospace");
+            surface.fill_text(&format!("{:.2}", ring.base_energy), tpx as f64, tpy as f64).unwrap();
 
-                surface.set_fill_style(&"blue".into());
-                surface.begin_path();
-                surface.arc(px as f64, py as f64, 7.0, 0.0, TAU).unwrap();
-                surface.fill();
+            if let GameStatus::Playing = self.game_status {
+                if ring.disrupted_time >= 0.0 {
+                    ring.disrupted_time -= context.delta_time() as f32;
+                }
+                if idx == self.current_ring {
+                    let px = pos.x + radius * self.particle_angle.cos();
+                    let py = pos.y + radius * self.particle_angle.sin();
+
+                    surface.set_fill_style(&"blue".into());
+                    surface.begin_path();
+                    surface.arc(px as f64, py as f64, 7.0, 0.0, TAU).unwrap();
+                    surface.fill();
+                }
             }
         }
 
-        let wrong_ring = &context.game().sounds.wrong_ring;
-        if jiggling != 0.0 && !wrong_ring.playing() {
-            wrong_ring.play();
+        if let GameStatus::Playing = self.game_status {
+            let wrong_ring = &context.game().sounds.wrong_ring;
+            if jiggling != 0.0 && !wrong_ring.playing() && sounds_enabled() {
+                wrong_ring.play();
+            }
         }
 
         if let Some(Disruption { start, end, .. }) = self.disruption.as_ref() {
@@ -271,6 +309,52 @@ impl GameState<QuantumLoops> for MainGameState {
             surface.stroke();
         }
 
+        self.energy.update(context.delta_time());
+
+        if self.energy.get() <= 0.0 {
+            self.game_status = GameStatus::Lost;
+            return StateTransition::Pop;
+        }
+
+        if self.update_particle_level(context, true) {
+            let level = self.level.as_ref().unwrap();
+
+            let free = level.energy - level.rings
+                .iter()
+                .map(|r| r.base_energy)
+                .sum::<f32>();
+
+            self.game_status = GameStatus::Won {
+                score: (1.0 - (free - self.energy.get()) / free) * 100.0,
+            };
+            return StateTransition::Pop;
+        }
+
+        if let GameStatus::Playing = self.game_status {
+            self.particle_angle += (TAU * context.delta_time()) as f32;
+        }
+
         StateTransition::None
+    }
+
+    fn on_popped(self: Box<Self>, context: &mut Context<QuantumLoops>) -> StateTransition<QuantumLoops> {
+        match self.game_status {
+            GameStatus::Won { score } => {
+                if sounds_enabled() {
+                    context.game().sounds.win.play();
+                }
+                StateTransition::Push(Box::new(GameWonState::new(*self, score)))
+            },
+            GameStatus::Lost => {
+                if sounds_enabled() {
+                    context.game().sounds.lose.play();
+                }
+                StateTransition::Push(Box::new(GameLostState::new(*self)))
+            },
+            GameStatus::Paused => {
+                StateTransition::Push(Box::new(PauseState::new(*self)))
+            }
+            _ => StateTransition::None,
+        }
     }
 }

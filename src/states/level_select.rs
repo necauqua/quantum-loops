@@ -1,68 +1,43 @@
-use std::cell::RefCell;
-use std::rc::Rc;
-
-use wasm_bindgen::{*, prelude::*};
-use web_sys::Response;
-
 use crate::{
     engine::{
+        self,
+        Context,
         event::Event,
         GameState,
-        GameUpdate,
         StateTransition,
-        util::PromiseGlue,
         util::RemConversions,
-        window
     },
+    level::StoredData,
     QuantumLoops,
-    states::main_menu::Background,
-    ui::Buttons,
-    level::GameLevel,
+    states::{
+        main_game::MainGameState,
+        main_menu::{Background, MainMenuState},
+    },
+    ui::Button,
 };
-use crate::states::main_game::MainGameState;
-use crate::states::main_menu::MainMenuState;
 
-pub struct LevelSelectState {
-    levels: Rc<RefCell<Option<Vec<GameLevel>>>>,
+pub struct LevelMenuState {
     levels_added: bool,
     background: Background,
-    buttons: Buttons,
+    buttons: Vec<Button>,
     button_scroll: f32,
     button_limit: f32,
 }
 
-impl LevelSelectState {
+impl LevelMenuState {
     pub fn new() -> Self {
         Self {
-            levels: Default::default(),
             levels_added: false,
             background: Background::new(),
-            buttons: Buttons::new(),
+            buttons: Vec::new(),
             button_scroll: 0.0,
             button_limit: 0.0,
         }
     }
 }
 
-#[wasm_bindgen(inline_js = "\
-export function load_json(url) {
-    return fetch(url).then(res => res.json());
-}")]
-extern "C" {
-    fn load_json(url: &str) -> js_sys::Promise;
-}
-
-impl GameState<QuantumLoops> for LevelSelectState {
-    fn on_mounted(&mut self, _: &mut GameUpdate<QuantumLoops>) {
-        let moved_levels = self.levels.clone();
-        let _ = load_json("assets/levels.json")
-            .rust_then(move |json: JsValue| {
-                let levels: Vec<GameLevel> = json.into_serde().unwrap();
-                *moved_levels.borrow_mut() = Some(levels);
-            });
-    }
-
-    fn on_event(&mut self, event: Event, context: &mut GameUpdate<QuantumLoops>) -> StateTransition<QuantumLoops> {
+impl GameState<QuantumLoops> for LevelMenuState {
+    fn on_event(&mut self, event: Event, context: &mut Context<QuantumLoops>) -> StateTransition<QuantumLoops> {
         match event {
             Event::MouseWheel { delta, .. } => {
                 let yoff = -delta.y * 10.0;
@@ -70,17 +45,20 @@ impl GameState<QuantumLoops> for LevelSelectState {
 
                 if new_scroll >= 0.0 && new_scroll < self.button_limit {
                     self.button_scroll = new_scroll;
-                    self.buttons.move_buttons([0.0, yoff].into());
+                    for b in &mut self.buttons {
+                        b.pos.y += yoff;
+                    }
                 }
                 StateTransition::None
             }
             _ => {
-                if let Some(i) = self.buttons.on_event(&event, context) {
-                    return if i == 0 {
-                        StateTransition::Set(Box::new(MainMenuState::new()))
-                    } else {
-                        let game_level = self.levels.borrow_mut().as_ref().unwrap()[i - 1].clone();
-                        StateTransition::Set(Box::new(MainGameState::new(game_level)))
+                for (i, button) in self.buttons.iter_mut().enumerate() {
+                    if button.on_event(&event, context) {
+                        return StateTransition::Set(if i == 0 {
+                            Box::new(MainMenuState::new())
+                        } else {
+                            Box::new(MainGameState::new(i - 1))
+                        });
                     }
                 }
                 StateTransition::None
@@ -88,9 +66,9 @@ impl GameState<QuantumLoops> for LevelSelectState {
         }
     }
 
-    fn update(&mut self, context: &mut GameUpdate<QuantumLoops>) -> StateTransition<QuantumLoops> {
+    fn on_update(&mut self, context: &mut Context<QuantumLoops>) -> StateTransition<QuantumLoops> {
         // levels finally arrived
-        if let Some(levels) = self.levels.borrow_mut().as_ref() {
+        if let Some(levels) = context.game().levels.borrow_mut().as_ref() {
             if !self.levels_added {
                 self.levels_added = true;
 
@@ -100,19 +78,27 @@ impl GameState<QuantumLoops> for LevelSelectState {
                 let mut y = size.y * 0.25;
 
                 y += off;
-                self.buttons.add_button([x, y].into(), "back".into());
+                self.buttons.push(Button::new(" ← back  ".into())
+                    .with_pos([x, y].into()));
 
-                for level in levels {
+                let unlocked = engine::get_data::<StoredData>().unlocked_level;
+
+                for (idx, level) in levels.iter().enumerate() {
                     y += off;
-                    self.buttons.add_button([x, y].into(), level.name.clone());
+                    let mut button = Button::new(level.name.clone().into())
+                        .with_pos([x, y].into());
+                    button.enabled = idx <= unlocked;
+                    self.buttons.push(button);
                 }
 
                 self.button_limit = self.buttons.len() as f32 * off - size.y * 0.25;
             }
         }
 
-        self.background.update(context);
-        self.buttons.update(context);
+        self.background.render(context);
+        for button in &mut self.buttons {
+            button.render(context);
+        }
         StateTransition::None
     }
 }

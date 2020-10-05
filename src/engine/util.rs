@@ -1,10 +1,5 @@
-use std::{
-    cell::RefCell,
-    panic::{set_hook, take_hook},
-    rc::Rc
-};
+use std::panic::{set_hook, take_hook};
 
-use wasm_bindgen::{*, prelude::*};
 use web_sys::console::error_1;
 
 pub fn setup_panic_hook() {
@@ -15,24 +10,6 @@ pub fn setup_panic_hook() {
         error_1(&msg);
         default_hook(panic_info);
     }));
-}
-
-pub trait PromiseGlue {
-    fn rust_then<R: JsCast>(&self, f: impl FnMut(R) + 'static) -> js_sys::Promise;
-}
-
-impl PromiseGlue for js_sys::Promise {
-    fn rust_then<R: JsCast>(&self, mut f: impl FnMut(R) + 'static) -> js_sys::Promise {
-        let cb = Rc::new(RefCell::new(None));
-        let other = cb.clone();
-        *cb.borrow_mut() = Some(Closure::wrap(Box::new(move |res: JsValue| {
-            f(res.dyn_into().unwrap());
-            let _ = other.borrow_mut().take();
-        }) as Box<dyn FnMut(JsValue)>));
-        let borrowed = cb.borrow();
-
-        self.then(borrowed.as_ref().unwrap())
-    }
 }
 
 #[derive(Debug)]
@@ -57,21 +34,22 @@ impl SmoothChange {
         self.next_value = value;
     }
 
+    pub fn full_set(&mut self, value: f32) {
+        self.prev_value = value;
+        self.value = value;
+        self.next_value = value;
+    }
+
     pub fn get_interp(&self) -> f32 {
         self.value
     }
 
     pub fn update(&mut self, delta_time: f64) {
-
-        // ZERO CLUE HOW THIS WORKS BUT OKAY
-
         let dist = self.next_value - self.prev_value;
         if dist.abs() <= f32::EPSILON {
             return
         }
-
-        self.value += dist * delta_time as f32 * self.speed;
-
+        self.value += dist.signum() * self.speed * delta_time as f32;
         if self.value - self.next_value <= f32::EPSILON {
             self.prev_value = self.next_value;
         }

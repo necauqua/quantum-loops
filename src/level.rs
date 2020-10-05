@@ -58,10 +58,32 @@ pub struct GameLevel {
 
 impl EnergyRing {
     pub fn intersects(&self, center: Point2<f32>, disruption: &Disruption) -> bool {
+        let min_dim = center.coords.min() * 2.0;
+        let center = center + self.offset.coords * min_dim;
         let d1 = disruption.start.coords.metric_distance(&center.coords);
         let d2 = disruption.end.coords.metric_distance(&center.coords);
-        let r = center.coords.min() * 2.0 * self.radius;
+        let r = min_dim * self.radius;
         d1.min(d2) <= r && d1.max(d2) >= r
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoredData {
+    pub passed_tutorial: bool,
+    pub unlocked_level: usize,
+    pub best_scores: Vec<f32>,
+    pub sounds_enabled: bool,
+    pub music_enabled: bool,
+}
+
+impl Default for StoredData {
+    fn default() -> Self {
+        Self {
+            passed_tutorial: false,
+            unlocked_level: 0,
+            best_scores: Vec::new(),
+            sounds_enabled: true,
+            music_enabled: true,
+        }
+    }
+}

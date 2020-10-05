@@ -39,6 +39,7 @@ features = [
     'Element',
     'Node',
     'Response',
+    'Storage',
     'Event',
     'MouseEvent',
     'WheelEvent',

@@ -1,14 +1,14 @@
 use nalgebra::Vector2;
 use noise::{NoiseFn, Perlin};
 
-use crate::{
-    engine::{self, *},
-    QuantumLoops,
-    states::main_game::{draw_background, MainGameState},
-};
-use crate::engine::event::Event;
-use crate::states::level_select::LevelSelectState;
-use crate::ui::Buttons;
+use crate::{engine::{
+    self,
+    *,
+    event::Event
+}, level::StoredData, QuantumLoops, states::level_select::LevelMenuState, states::main_game::draw_background, states::tutorial::TutorialState, ui::Button, music_enabled};
+use crate::engine::util::RemConversions;
+use crate::states::options::OptionsState;
+use crate::states::scores::ScoresState;
 
 #[derive(Debug)]
 pub struct Background {
@@ -24,7 +24,7 @@ impl Background {
         }
     }
 
-    pub fn update(&mut self, context: &GameUpdate<QuantumLoops>) {
+    pub fn render(&mut self, context: &Context<QuantumLoops>) {
         let nx = (self.noise.get([0.0, self.offset]) * 2.0 - 1.0) * 50.0;
         let ny = (self.noise.get([self.offset, 0.0]) * 2.0 - 1.0) * 50.0;
 
@@ -37,52 +37,69 @@ impl Background {
 #[derive(Debug)]
 pub struct MainMenuState {
     background: Background,
-    buttons: Buttons,
+    play: Button,
+    scores: Button,
+    options: Button,
+    exit: Button,
 }
 
 impl MainMenuState {
     pub fn new() -> Self {
         Self {
             background: Background::new(),
-            buttons: Buttons::new(),
+            play: Button::new("Play".into()),
+            scores: Button::new("Scores".into()),
+            options: Button::new("Options".into()),
+            exit: Button::new("Exit".into()),
         }
     }
 }
 
 impl GameState<QuantumLoops> for MainMenuState {
-    fn on_mounted(&mut self, context: &mut GameUpdate<QuantumLoops>) {
-        let bg = &context.game().sounds.background;
-        bg.set_volume(0.01);
-        bg.play();
-
-        let size = context.size();
-        let center = size / 2.0;
-        let offset: Vector2<f32> = [0.0, 100.0].into();
-
-        self.buttons.add_button(center - offset, "Play".into());
-        self.buttons.add_button(center, "Options".into());
-        self.buttons.add_button(center + offset, "Exit".into());
-    }
-
-    fn on_event(&mut self, event: Event, context: &mut GameUpdate<QuantumLoops>) -> StateTransition<QuantumLoops> {
-        match self.buttons.on_event(&event, context) {
-            Some(0) => StateTransition::Set(Box::new(LevelSelectState::new())),
-            Some(1) => {
-                // TODO options
-                // return StateTransition::Set(Box::new(OptionsState::new()));
-                StateTransition::None
-            }
-            Some(2) => {
-                engine::window().close().unwrap();
-                StateTransition::None
-            }
-            _ => StateTransition::None
+    fn on_pushed(&mut self, context: &mut Context<QuantumLoops>) {
+        if music_enabled() {
+            context.game().sounds.background.play();
         }
     }
 
-    fn update(&mut self, context: &mut GameUpdate<QuantumLoops>) -> StateTransition<QuantumLoops> {
-        self.background.update(context);
-        self.buttons.update(context);
+    fn on_event(&mut self, event: Event, context: &mut Context<QuantumLoops>) -> StateTransition<QuantumLoops> {
+        if let Event::MouseDown {..} = event {
+            if music_enabled() {
+                context.game().sounds.background.play();
+            }
+        }
+        if self.play.on_event(&event, context) {
+            return StateTransition::Set(
+                if engine::get_data::<StoredData>().passed_tutorial {
+                    Box::new(LevelMenuState::new())
+                } else {
+                    Box::new(TutorialState::new())
+                });
+        } else if self.scores.on_event(&event, context) {
+            return StateTransition::Push(Box::new(ScoresState::new()));
+        } else if self.options.on_event(&event, context) {
+            return StateTransition::Set(Box::new(OptionsState::new()));
+        } else if self.exit.on_event(&event, context) {
+            engine::window().close().unwrap();
+        }
+        StateTransition::None
+    }
+
+    fn on_update(&mut self, context: &mut Context<QuantumLoops>) -> StateTransition<QuantumLoops> {
+        let center = context.size() / 2.0;
+        let offset: Vector2<f32> = [0.0, 2.5.rem_to_pixels()].into();
+
+        self.play.pos = center - offset * 2.0;
+        self.scores.pos = center - offset;
+        self.options.pos = center;
+        self.exit.pos = center + offset;
+
+        self.background.render(context);
+        self.play.render(context);
+        self.scores.render(context);
+        self.options.render(context);
+        self.exit.render(context);
+
         StateTransition::None
     }
 }

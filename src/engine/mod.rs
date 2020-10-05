@@ -1,9 +1,13 @@
+#![allow(dead_code)]
+
 use std::{
     cell::RefCell,
     collections::VecDeque,
     rc::Rc,
 };
+
 use nalgebra::Point2;
+use serde::{Deserialize, Serialize};
 use wasm_bindgen::{*, prelude::*};
 use web_sys::{AudioContext, CanvasRenderingContext2d, Document, HtmlCanvasElement, HtmlElement, Window};
 
@@ -32,6 +36,26 @@ pub fn time() -> f64 {
     js_sys::Date::now() / 1e3
 }
 
+pub fn get_data<D: Default + for<'a> Deserialize<'a>>() -> D {
+    window()
+        .local_storage()
+        .unwrap()
+        .unwrap()
+        .get("data")
+        .unwrap()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+pub fn set_data<D: Serialize>(data: D) {
+    window()
+        .local_storage()
+        .unwrap()
+        .unwrap()
+        .set("data", &serde_json::to_string(&data).unwrap())
+        .unwrap()
+}
+
 fn setup_canvas(event_queue: Rc<RefCell<VecDeque<Event>>>) -> CanvasRenderingContext2d {
     let canvas = document().create_element("canvas")
         .map_err(|_| ())
@@ -55,6 +79,9 @@ fn setup_canvas(event_queue: Rc<RefCell<VecDeque<Event>>>) -> CanvasRenderingCon
         canvas.set_attribute("style", &style).unwrap();
 
         context.scale(ratio, ratio).unwrap();
+
+        context.set_text_align("center");
+        context.set_text_baseline("middle");
     }
 
     let moved_window = window();
@@ -89,7 +116,7 @@ impl Iterator for Events {
     }
 }
 
-pub struct GameUpdate<'a, G: Game> {
+pub struct Context<'a, G: Game> {
     game: &'a mut G,
     delta_time: f64,
     size: Point2<f32>,
@@ -104,7 +131,7 @@ pub enum StateTransition<G> {
     Pop,
 }
 
-impl<'a, G: Game> GameUpdate<'a, G> {
+impl<'a, G: Game> Context<'a, G> {
     pub fn game(&self) -> &G {
         self.game
     }
@@ -144,7 +171,7 @@ fn run<G: Game + 'static>() {
         audio_context: audio_context.clone(),
     });
     state_stack.push_front(current_state);
-    state_stack[0].on_mounted(&mut GameUpdate {
+    state_stack[0].on_pushed(&mut Context {
         game: &mut game,
         delta_time: 0.0,
         size: [canvas.width() as f32, canvas.height() as f32].into(),
@@ -172,7 +199,7 @@ fn run<G: Game + 'static>() {
 
         let now = time();
 
-        let mut context = GameUpdate {
+        let mut context = Context {
             game: &mut game,
             delta_time: now - last_time,
             size: [width, height].into(),
@@ -180,35 +207,43 @@ fn run<G: Game + 'static>() {
             audio_context: &audio_context,
         };
 
-        let top_state = &mut state_stack[0];
-
         let transition = loop {
             if let Some(event) = event_queue.borrow_mut().pop_back() {
-                match top_state.on_event(event, &mut context) {
+                match state_stack[0].on_event(event, &mut context) {
                     StateTransition::None => (),
                     x => break x,
                 }
             } else {
-                break top_state.update(&mut context);
+                break state_stack[0].on_update(&mut context);
             }
         };
 
-        match transition {
-            StateTransition::Set(state) => {
-                *top_state = state;
-                top_state.on_mounted(&mut context);
-            }
-            StateTransition::Push(state) => {
-                state_stack.push_front(state);
-                state_stack[0].on_mounted(&mut context);
-            }
-            StateTransition::Pop => {
-                if state_stack.len() == 1 {
-                    panic!("Trying to pop last state!!");
+        let mut transitions = vec![transition];
+
+        while let Some(transition) = transitions.pop() {
+            match transition {
+                StateTransition::Set(state) => {
+                    state_stack[0] = state;
+                    state_stack[0].on_pushed(&mut context);
                 }
-                state_stack.pop_front();
+                StateTransition::Push(state) => {
+                    state_stack.push_front(state);
+                    state_stack[0].on_pushed(&mut context);
+                }
+                StateTransition::Pop => {
+                    let pop_trn = state_stack.pop_front().unwrap().on_popped(&mut context);
+                    match pop_trn {
+                        StateTransition::Push(_) => {}
+                        _ => {
+                            if state_stack.is_empty() {
+                                panic!("Popped the last state!");
+                            }
+                        }
+                    }
+                    transitions.push(pop_trn);
+                }
+                StateTransition::None => {}
             }
-            StateTransition::None => {}
         }
 
         last_time = now;
@@ -241,13 +276,18 @@ impl Resources {
 // copying Amethyst so hard accidentaly
 // well their state design is pretty good I guess
 pub trait GameState<G: Game> where Self: 'static {
-    fn on_mounted(&mut self, _context: &mut GameUpdate<G>) {}
+    fn on_pushed(&mut self, _context: &mut Context<G>) {}
 
-    fn on_event(&mut self, _event: Event, _context: &mut GameUpdate<G>) -> StateTransition<G> {
+    fn on_event(&mut self, _event: Event, _context: &mut Context<G>) -> StateTransition<G> {
         StateTransition::None
     }
 
-    fn update(&mut self, _context: &mut GameUpdate<G>) -> StateTransition<G> {
+    fn on_update(&mut self, _context: &mut Context<G>) -> StateTransition<G> {
+        StateTransition::None
+    }
+
+    #[allow(clippy::boxed_local)]
+    fn on_popped(self: Box<Self>, _context: &mut Context<G>) -> StateTransition<G> {
         StateTransition::None
     }
 }
