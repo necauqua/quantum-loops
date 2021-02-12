@@ -1,4 +1,7 @@
 # Quantum Loops
+
+![demo](https://necauqua.dev/images/level-3.gif)
+
 This is a game I made for [Ludum Dare 47](https://ldjam.com/events/ludum-dare/47/quantum-loops)
 in Rust, WASM and some pretty basic HTML5 canvas painting as well as some equally basic WebAudio.
 
@@ -13,8 +16,9 @@ contains unfinished changed at the moment.
 This game is a pretty simple concept of an aim puzzle with some minimalist aesthetics
 and calm background music.
 However, I failed miserably to make the game describe what is the objective,
-so if you really want to play it and don't understand what you need to do,
-I recommend you to visit that LD47 link above and read the step-by-step tutorial.
+so if you really want to play it and failed to understand what you need to do from the vague
+tutorial that it has, I recommend you to visit that LD47 link above and read the
+step-by-step tutorial and a straight description that I put there.
 
 Maybe in the future updates I will make it better, however at the momend the development
 of this project is frozen.
