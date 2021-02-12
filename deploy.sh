@@ -1,11 +1,11 @@
 #!/bin/bash
 
-wasm-pack build
+~/.cargo/bin/wasm-pack build || exit
 cd www || exit
 
 rm -rf dist
 
-npm run build
+npm run build || exit
 
 cd dist || exit
 zip -r ../ld47 ./*
@@ -16,5 +16,4 @@ scp ld47.zip necauqua.dev:.
 rm ld47.zip
 
 ssh necauqua.dev 'bash -c "rm -rf ld47; unzip ld47.zip -d ld47; rm ld47.zip"'
-
 

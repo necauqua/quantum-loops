@@ -1,29 +1,23 @@
 use nalgebra::Vector2;
 
 use crate::{
-    engine::{
-        Context,
-        event::Event,
-        GameState,
-        StateTransition,
-    },
-    engine,
-    engine::util::RemConversions,
+    engine::{event::Event, ui::Button, Context, GameState, StateTransition},
     level::StoredData,
+    states::{
+        main_menu::{Background, MainMenuState},
+        tutorial::TutorialState,
+    },
     QuantumLoops,
-    states::main_menu::{Background, MainMenuState},
-    states::tutorial::TutorialState,
-    ui::Button,
 };
 
 #[derive(Debug)]
 pub struct OptionsState {
     background: Background,
+    back: Button,
     reset: Button,
     tutorial: Button,
     sounds: Button,
     music: Button,
-    back: Button,
     sure_timer: f64,
 }
 
@@ -31,92 +25,102 @@ impl OptionsState {
     pub fn new() -> Self {
         Self {
             background: Background::new(),
-            reset: Button::new("Full reset".into()),
-            tutorial: Button::new("Open the tutorial".into()),
-            sounds: Button::new("Sounds: On".into()),
-            music: Button::new("Music: On".into()),
             back: Button::new(" ← back  ".into()),
+            reset: Button::empty(),
+            tutorial: Button::new("Open the tutorial".into()),
+            sounds: Button::empty(),
+            music: Button::empty(),
             sure_timer: 0.0,
         }
     }
 }
 
 impl GameState<QuantumLoops> for OptionsState {
-    fn on_event(&mut self, event: Event, context: &mut Context<QuantumLoops>) -> StateTransition<QuantumLoops> {
+    fn on_event(
+        &mut self,
+        event: Event,
+        context: &mut Context<QuantumLoops>,
+    ) -> StateTransition<QuantumLoops> {
         if let Event::KeyDown { code: 27, .. } = event {
-            return StateTransition::Set(Box::new(MainMenuState::new()));
+            return StateTransition::set(MainMenuState::new());
         }
         if self.reset.on_event(&event, context) {
             if self.sure_timer <= 0.0 {
                 self.sure_timer = 3.0;
             } else {
-                engine::set_data::<StoredData>(Default::default());
-                return StateTransition::Set(Box::new(MainMenuState::new()));
+                context.set_storage(Default::default());
+                return StateTransition::set(MainMenuState::new());
             }
         } else if self.tutorial.on_event(&event, context) {
-            return StateTransition::Set(Box::new(TutorialState::new()));
+            return StateTransition::set(TutorialState::new());
         } else if self.sounds.on_event(&event, context) {
-            let data: StoredData = engine::get_data();
-            engine::set_data(StoredData {
+            let data = context.storage().clone();
+            context.sound_context_mut().sound_mask.set(0, !data.sounds_enabled);
+            context.set_storage(StoredData {
                 sounds_enabled: !data.sounds_enabled,
                 ..data
             });
         } else if self.music.on_event(&event, context) {
-            let data: StoredData = engine::get_data();
-            let bg = &context.game().sounds.background;
+            let data = context.storage().clone();
+            context.sound_context_mut().sound_mask.set(1, !data.music_enabled);
+            let bg = &context.game.sounds.background;
             if data.music_enabled {
                 bg.stop();
             } else {
-                bg.play();
+                bg.play_unique();
             }
-            engine::set_data(StoredData {
+            context.set_storage(StoredData {
                 music_enabled: !data.music_enabled,
                 ..data
             });
         } else if self.back.on_event(&event, context) {
-            return StateTransition::Set(Box::new(MainMenuState::new()));
+            return StateTransition::set(MainMenuState::new());
         }
         StateTransition::None
     }
 
     fn on_update(&mut self, context: &mut Context<QuantumLoops>) -> StateTransition<QuantumLoops> {
-        let center = context.size() / 2.0;
-        let offset: Vector2<f32> = [0.0, 2.5.rem_to_pixels()].into();
+        let center = context.surface().size() / 2.0;
+        let offset: Vector2<f64> = [0.0, context.rem_to_px(2.5)].into();
 
-        if self.sure_timer <= 0.0 {
-            self.reset.text = "Full reset".into();
-        } else {
+        if self.sure_timer > 0.0 {
             self.sure_timer -= context.delta_time();
-            self.reset.text = "Full reset (are you sure?)".into();
         }
 
-        // this all is so dumb
+        self.background.on_update(context);
 
-        let stored_data: StoredData = engine::get_data();
-        self.sounds.text = (if stored_data.sounds_enabled {
-            "Sounds: On"
-        } else {
-            "Sounds: Off"
-        }).into();
+        let s = context.storage();
 
-        self.music.text = (if stored_data.music_enabled {
-            "Music: On"
-        } else {
-            "Music: Off"
-        }).into();
+        self.reset.set_text(
+            if self.sure_timer <= 0.0 {
+                "Full reset"
+            } else {
+                "Full reset (are you sure?)"
+            }
+            .into(),
+        );
+        self.sounds.set_text(
+            if s.sounds_enabled {
+                "Sounds: On"
+            } else {
+                "Sounds: Off"
+            }
+            .into(),
+        );
+        self.music.set_text(
+            if s.music_enabled {
+                "Music: On"
+            } else {
+                "Music: Off"
+            }
+            .into(),
+        );
 
-        self.reset.pos = center - offset * 2.0;
-        self.tutorial.pos = center - offset;
-        self.sounds.pos = center;
-        self.music.pos = center + offset;
-        self.back.pos = center + offset * 2.0;
-
-        self.background.render(context);
-        self.reset.render(context);
-        self.tutorial.render(context);
-        self.sounds.render(context);
-        self.music.render(context);
-        self.back.render(context);
+        self.back.on_update(context, center - offset * 2.0);
+        self.reset.on_update(context, center - offset);
+        self.tutorial.on_update(context, center);
+        self.sounds.on_update(context, center + offset);
+        self.music.on_update(context, center + offset * 2.0);
 
         StateTransition::None
     }

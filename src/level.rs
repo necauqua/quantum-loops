@@ -1,17 +1,18 @@
-use nalgebra::Point2;
+use nalgebra::Vector2;
 use serde::{Deserialize, Serialize};
 
 use crate::states::main_game::Disruption;
+use crate::engine::util::Bitmap;
 
-fn default_offset() -> Point2<f32> {
+fn default_offset() -> Vector2<f64> {
     [0.0, 0.0].into()
 }
 
-fn default_width() -> f32 {
+fn default_width() -> f64 {
     1.0
 }
 
-fn default_restore_time() -> f32 {
+fn default_restore_time() -> f64 {
     3.0
 }
 
@@ -21,22 +22,22 @@ fn default_color() -> String {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct EnergyRing {
-    pub radius: f32,
+    pub radius: f64,
 
     #[serde(default = "default_offset")]
-    pub offset: Point2<f32>,
+    pub offset: Vector2<f64>,
     #[serde(default = "default_width")]
-    pub width: f32,
+    pub width: f64,
     #[serde(default = "default_color")]
     pub color: String,
 
-    pub base_energy: f32,
+    pub base_energy: f64,
 
     #[serde(default = "default_restore_time")]
-    pub restore_time: f32,
+    pub restore_time: f64,
 
     #[serde(skip)]
-    pub disrupted_time: f32,
+    pub disrupted_time: f64,
 }
 
 impl Clone for EnergyRing {
@@ -52,16 +53,16 @@ impl Clone for EnergyRing {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GameLevel {
     pub name: String,
-    pub energy: f32,
+    pub energy: f64,
     pub rings: Vec<EnergyRing>,
 }
 
 impl EnergyRing {
-    pub fn intersects(&self, center: Point2<f32>, disruption: &Disruption) -> bool {
-        let min_dim = center.coords.min() * 2.0;
-        let center = center + self.offset.coords * min_dim;
-        let d1 = disruption.start.coords.metric_distance(&center.coords);
-        let d2 = disruption.end.coords.metric_distance(&center.coords);
+    pub fn intersects(&self, center: Vector2<f64>, disruption: &Disruption) -> bool {
+        let min_dim = center.min() * 2.0;
+        let center = center + self.offset * min_dim;
+        let d1 = disruption.start.metric_distance(&center);
+        let d2 = disruption.end.metric_distance(&center);
         let r = min_dim * self.radius;
         d1.min(d2) <= r && d1.max(d2) >= r
     }
@@ -71,7 +72,7 @@ impl EnergyRing {
 pub struct StoredData {
     pub passed_tutorial: bool,
     pub unlocked_level: usize,
-    pub best_scores: Vec<f32>,
+    pub best_scores: Vec<f64>,
     pub sounds_enabled: bool,
     pub music_enabled: bool,
 }
@@ -85,5 +86,13 @@ impl Default for StoredData {
             sounds_enabled: true,
             music_enabled: true,
         }
+    }
+}
+
+impl StoredData {
+    pub fn get_enabled_sounds(&self) -> Bitmap {
+        Bitmap::empty()
+            .with_set(0, self.sounds_enabled)
+            .with_set(1, self.music_enabled)
     }
 }

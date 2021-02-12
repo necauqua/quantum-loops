@@ -1,32 +1,19 @@
-use std::cell::RefCell;
-use std::rc::Rc;
-
-use wasm_bindgen::prelude::*;
-use wasm_bindgen_futures::{JsFuture, spawn_local};
+use wasm_bindgen::{prelude::*, JsCast};
+use wasm_bindgen_futures::{spawn_local, JsFuture};
 use web_sys::Response;
 
-use engine::{
-    Game, GameRun, GameState, Resources,
-    sound::Music,
-    util::setup_panic_hook,
-};
+use crate::engine::util::{Mut, Bitmap};
+use engine::{sound::Sound, util::setup_panic_hook, window, Game, GameRun, GameState, Resources};
+use level::{GameLevel, StoredData};
 use states::main_menu::MainMenuState;
 
-use crate::engine::sound::Sound;
-use crate::level::{GameLevel, StoredData};
-use crate::engine::window;
-use wasm_bindgen::JsCast;
-
 mod engine;
-mod states;
-mod ui;
 mod level;
+mod states;
 
-// waiting for that (or at least for TWO_PI lol)
-pub const TAU: f64 = 2.0 * std::f64::consts::PI;
-
+#[derive(Debug)]
 pub struct Sounds {
-    background: Music,
+    background: Sound,
     win: Sound,
     lose: Sound,
     hover: Sound,
@@ -38,30 +25,27 @@ pub struct Sounds {
 impl Sounds {
     fn load(resources: Resources) -> Sounds {
         Self {
-            background: resources.load_music("assets/background.mp3")
+            background: resources
+                .load_sound("assets/background.mp3")
                 .with_volume(0.01)
+                .with_layers(Bitmap::empty().with_on(1))
                 .looped(),
             win: resources.load_sound("assets/win.wav").with_volume(0.2),
             lose: resources.load_sound("assets/lose.wav").with_volume(0.2),
             hover: resources.load_sound("assets/hover.wav").with_volume(0.2),
             click: resources.load_sound("assets/click.wav").with_volume(0.2),
             jump: resources.load_sound("assets/jump.wav").with_volume(0.2),
-            wrong_ring: resources.load_sound("assets/wrong-ring.wav").with_volume(0.2),
+            wrong_ring: resources
+                .load_sound("assets/wrong-ring.wav")
+                .with_volume(0.2),
         }
     }
 }
 
+#[derive(Debug)]
 pub struct QuantumLoops {
     sounds: Sounds,
-    levels: Rc<RefCell<Option<Vec<GameLevel>>>>,
-}
-
-pub fn sounds_enabled() -> bool {
-    engine::get_data::<StoredData>().sounds_enabled
-}
-
-pub fn music_enabled() -> bool {
-    engine::get_data::<StoredData>().music_enabled
+    levels: Mut<Option<Vec<GameLevel>>>,
 }
 
 impl QuantumLoops {
@@ -69,15 +53,16 @@ impl QuantumLoops {
         &self.sounds
     }
 
-    pub fn get_level(&mut self, level: usize) -> Option<GameLevel> {
-        match &*self.levels.borrow_mut() {
-            Some(levels) => levels.get(level).cloned(),
-            _ => None,
-        }
+    pub fn get_level(&self, level: usize) -> Option<GameLevel> {
+        self.levels
+            .borrow_mut()
+            .as_ref()
+            .and_then(|levels| levels.get(level).cloned())
     }
 
     pub fn level_count(&self) -> usize {
-        self.levels.borrow()
+        self.levels
+            .borrow()
             .as_ref()
             .map(Vec::len)
             .unwrap_or_default()
@@ -86,22 +71,26 @@ impl QuantumLoops {
     fn load_levels(&self) {
         let moved_levels = self.levels.clone();
         spawn_local(async move {
-            *moved_levels.borrow_mut() = Some(async move {
-                let response: Response = JsFuture::from(window()
-                    .fetch_with_str("assets/levels.json"))
-                    .await?
-                    .dyn_into()?;
-                JsFuture::from(response.json()?)
-                    .await
-            }.await
+            *moved_levels.borrow_mut() = Some(
+                async move {
+                    let response: Response =
+                        JsFuture::from(window().fetch_with_str("assets/levels.json"))
+                            .await?
+                            .dyn_into()?;
+                    JsFuture::from(response.json()?).await
+                }
+                .await
                 .unwrap()
                 .into_serde()
-                .unwrap());
+                .unwrap(),
+            );
         });
     }
 }
 
 impl Game for QuantumLoops {
+    type Storage = StoredData;
+
     fn load(resources: Resources) -> (Self, Box<dyn GameState<QuantumLoops>>) {
         let levels = Default::default();
         let global = QuantumLoops {

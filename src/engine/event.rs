@@ -1,71 +1,25 @@
-use std::cell::RefCell;
-use std::collections::VecDeque;
-use std::ops::Deref;
-use std::rc::Rc;
+use nalgebra::Vector2;
+use wasm_bindgen::{prelude::*, *};
+use web_sys::{EventTarget, MouseEvent, TouchEvent, WheelEvent};
 
-use nalgebra::{Point2, Vector2};
-use wasm_bindgen::{*, prelude::*};
-use web_sys::{EventTarget, HtmlCanvasElement, MouseEvent, WheelEvent};
+use crate::engine::util::Mut;
 
-trait ListenForever {
+pub trait ListenForever {
     fn listen_forever<E: JsCast>(&self, event_type: &str, f: impl FnMut(E) + 'static);
 }
 
-impl<T: Deref<Target=EventTarget>> ListenForever for T {
+impl ListenForever for EventTarget {
     fn listen_forever<E: JsCast>(&self, event_type: &str, mut f: impl FnMut(E) + 'static) {
-        let closure =
-            Closure::wrap(Box::new(move |e: web_sys::Event|
-                f(e.dyn_into().unwrap())) as Box<dyn FnMut(web_sys::Event)>);
+        let closure = Closure::wrap(Box::new(move |e: web_sys::Event| f(e.dyn_into().unwrap()))
+            as Box<dyn FnMut(web_sys::Event)>);
 
-        self.add_event_listener_with_callback(event_type, closure.as_ref().unchecked_ref()).unwrap();
+        self.add_event_listener_with_callback(event_type, closure.as_ref().unchecked_ref())
+            .unwrap();
         closure.forget();
     }
 }
 
-pub(super) fn setup_events(canvas: &HtmlCanvasElement, event_queue: Rc<RefCell<VecDeque<Event>>>) {
-    canvas.listen_forever("contextmenu", |e: web_sys::Event| e.prevent_default());
-
-    let ratio = super::window().device_pixel_ratio() as f32;
-
-    let moved_event_queue = event_queue.clone();
-    canvas.listen_forever("mouseup", move |e: MouseEvent| {
-        moved_event_queue.borrow_mut().push_back(Event::MouseUp {
-            pos: [(e.client_x() as f32 * ratio), (e.client_y() as f32 * ratio)].into(),
-            button: match MouseButton::from_code(e.button()) {
-                Some(b) => b,
-                _ => return,
-            },
-        });
-    });
-
-    let moved_event_queue = event_queue.clone();
-    canvas.listen_forever("mousedown", move |e: MouseEvent| {
-        moved_event_queue.borrow_mut().push_back(Event::MouseDown {
-            pos: [(e.client_x() as f32 * ratio), (e.client_y() as f32 * ratio)].into(),
-            button: match MouseButton::from_code(e.button()) {
-                Some(b) => b,
-                _ => return,
-            },
-        });
-    });
-
-    let moved_event_queue = event_queue.clone();
-    canvas.listen_forever("mousemove", move |e: MouseEvent| {
-        moved_event_queue.borrow_mut().push_back(Event::MouseMove {
-            pos: [(e.client_x() as f32 * ratio), (e.client_y() as f32 * ratio)].into(),
-            buttons: MouseButton::from_bitmap(e.buttons()),
-        });
-    });
-
-    let moved_event_queue = event_queue.clone();
-    canvas.listen_forever("wheel", move |e: WheelEvent| {
-        moved_event_queue.borrow_mut().push_back(Event::MouseWheel {
-            pos: [(e.client_x() as f32 * ratio), (e.client_y() as f32 * ratio)].into(),
-            delta: [e.delta_x() as f32, e.delta_y() as f32].into(),
-            buttons: MouseButton::from_bitmap(e.buttons()),
-        });
-    });
-
+pub(super) fn setup_keyboard_events(target: &EventTarget, events: Mut<Vec<Event>>) {
     fn get_meta(e: web_sys::KeyboardEvent) -> KeyMeta {
         KeyMeta {
             repeat: e.repeat(),
@@ -76,20 +30,18 @@ pub(super) fn setup_events(canvas: &HtmlCanvasElement, event_queue: Rc<RefCell<V
         }
     }
 
-    let document = super::document();
-
-    let moved_event_queue = event_queue.clone();
-    document.listen_forever("keydown", move |e: web_sys::KeyboardEvent| {
-        moved_event_queue.borrow_mut().push_back(Event::KeyDown {
+    let moved_events = events.clone();
+    target.listen_forever("keydown", move |e: web_sys::KeyboardEvent| {
+        moved_events.borrow_mut().push(Event::KeyDown {
             code: e.key_code(),
             key: e.key(),
             meta: get_meta(e),
         })
     });
 
-    let moved_event_queue = event_queue;//.clone();
-    document.listen_forever("keyup", move |e: web_sys::KeyboardEvent| {
-        moved_event_queue.borrow_mut().push_back(Event::KeyUp {
+    let moved_events = events; //.clone();
+    target.listen_forever("keyup", move |e: web_sys::KeyboardEvent| {
+        moved_events.borrow_mut().push(Event::KeyUp {
             code: e.key_code(),
             key: e.key(),
             meta: get_meta(e),
@@ -97,7 +49,86 @@ pub(super) fn setup_events(canvas: &HtmlCanvasElement, event_queue: Rc<RefCell<V
     });
 }
 
-#[derive(Debug, PartialEq, Eq)]
+pub(super) fn setup_touch_events(target: &EventTarget, events: Mut<Vec<Event>>) {
+    target.listen_forever("contextmenu", |e: web_sys::Event| e.prevent_default());
+
+    let ratio = super::window().device_pixel_ratio();
+
+    let moved_event_queue = events.clone();
+    target.listen_forever("mouseup", move |e: MouseEvent| {
+        moved_event_queue.borrow_mut().push(Event::MouseUp {
+            pos: [(e.client_x() as f64 * ratio), (e.client_y() as f64 * ratio)].into(),
+            button: match MouseButton::from_code(e.button()) {
+                Some(b) => b,
+                _ => return,
+            },
+        });
+    });
+
+    let moved_event_queue = events.clone();
+    target.listen_forever("mousedown", move |e: MouseEvent| {
+        moved_event_queue.borrow_mut().push(Event::MouseDown {
+            pos: [(e.client_x() as f64 * ratio), (e.client_y() as f64 * ratio)].into(),
+            button: match MouseButton::from_code(e.button()) {
+                Some(b) => b,
+                _ => return,
+            },
+        });
+    });
+
+    let moved_event_queue = events.clone();
+    target.listen_forever("mousemove", move |e: MouseEvent| {
+        moved_event_queue.borrow_mut().push(Event::MouseMove {
+            pos: [(e.client_x() as f64 * ratio), (e.client_y() as f64 * ratio)].into(),
+            buttons: MouseButton::from_bitmap(e.buttons()),
+        });
+    });
+
+    let moved_event_queue = events.clone();
+    target.listen_forever("wheel", move |e: WheelEvent| {
+        moved_event_queue.borrow_mut().push(Event::MouseWheel {
+            pos: [(e.client_x() as f64 * ratio), (e.client_y() as f64 * ratio)].into(),
+            delta: [e.delta_x(), e.delta_y()].into(),
+            buttons: MouseButton::from_bitmap(e.buttons()),
+        });
+    });
+
+    fn get_touches(e: TouchEvent, ratio: f64) -> Box<[Vector2<f64>]> {
+        let touch_list = e.touches();
+        let mut touches = Vec::with_capacity(touch_list.length() as usize);
+        while let Some(t) = touch_list.get(touches.len() as u32) {
+            touches.push([t.client_x() as f64 * ratio, t.client_y() as f64 * ratio].into());
+        }
+        touches.into_boxed_slice()
+    }
+
+    let moved_event_queue = events.clone();
+    target.listen_forever("touchstart", move |e: TouchEvent| {
+        // prevent mouse emulation if any
+        e.prevent_default();
+        moved_event_queue.borrow_mut().push(Event::TouchStart {
+            touches: get_touches(e, ratio),
+        });
+    });
+
+    let moved_event_queue = events.clone();
+    target.listen_forever("touchmove", move |e: TouchEvent| {
+        e.prevent_default();
+        moved_event_queue.borrow_mut().push(Event::TouchMove {
+            touches: get_touches(e, ratio),
+        });
+    });
+
+    let moved_event_queue = events.clone();
+    target.listen_forever("touchend", move |e: TouchEvent| {
+        e.prevent_default();
+        moved_event_queue.borrow_mut().push(Event::TouchEnd {
+            touches: get_touches(e, ratio),
+        });
+    });
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MouseButton {
     Left,
     Middle,
@@ -139,7 +170,7 @@ impl MouseButton {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct KeyMeta {
     repeat: bool,
     alt: bool,
@@ -148,15 +179,33 @@ pub struct KeyMeta {
     meta: bool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Event {
-    MouseDown { pos: Point2<f32>, button: MouseButton },
-    MouseUp { pos: Point2<f32>, button: MouseButton },
-    MouseMove { pos: Point2<f32>, buttons: Vec<MouseButton> },
-    MouseWheel {
-        pos: Point2<f32>,
+    MouseDown {
+        pos: Vector2<f64>,
+        button: MouseButton,
+    },
+    MouseUp {
+        pos: Vector2<f64>,
+        button: MouseButton,
+    },
+    MouseMove {
+        pos: Vector2<f64>,
         buttons: Vec<MouseButton>,
-        delta: Vector2<f32>,
+    },
+    MouseWheel {
+        pos: Vector2<f64>,
+        buttons: Vec<MouseButton>,
+        delta: Vector2<f64>,
+    },
+    TouchStart {
+        touches: Box<[Vector2<f64>]>,
+    },
+    TouchMove {
+        touches: Box<[Vector2<f64>]>,
+    },
+    TouchEnd {
+        touches: Box<[Vector2<f64>]>,
     },
     KeyDown {
         code: u32,

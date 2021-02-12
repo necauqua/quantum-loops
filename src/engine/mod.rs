@@ -1,23 +1,24 @@
 #![allow(dead_code)]
 
-use std::{
-    cell::RefCell,
-    collections::VecDeque,
-    rc::Rc,
-};
+use std::fmt::Debug;
 
-use nalgebra::Point2;
 use serde::{Deserialize, Serialize};
-use wasm_bindgen::{*, prelude::*};
-use web_sys::{AudioContext, CanvasRenderingContext2d, Document, HtmlCanvasElement, HtmlElement, Window};
+use wasm_bindgen::{prelude::*, *};
+use web_sys::{Document, HtmlElement, Window};
 
 use event::Event;
-use sound::{Music, Sound};
+use sound::{Sound, SoundContext};
 use sprite::Spritesheet;
+use util::Mut;
+
+use crate::engine::surface::Surface;
+use std::cell::{Ref, RefMut};
 
 pub mod event;
-pub mod sprite;
 pub mod sound;
+pub mod sprite;
+pub mod surface;
+pub mod ui;
 pub mod util;
 
 pub fn window() -> Window {
@@ -36,7 +37,7 @@ pub fn time() -> f64 {
     js_sys::Date::now() / 1e3
 }
 
-pub fn get_data<D: Default + for<'a> Deserialize<'a>>() -> D {
+fn get_data<D: Default + for<'a> Deserialize<'a>>() -> D {
     window()
         .local_storage()
         .unwrap()
@@ -47,216 +48,206 @@ pub fn get_data<D: Default + for<'a> Deserialize<'a>>() -> D {
         .unwrap_or_default()
 }
 
-pub fn set_data<D: Serialize>(data: D) {
+fn set_data<D: Serialize>(data: &D) {
     window()
         .local_storage()
         .unwrap()
         .unwrap()
-        .set("data", &serde_json::to_string(&data).unwrap())
+        .set("data", &serde_json::to_string(data).unwrap())
         .unwrap()
 }
 
-fn setup_canvas(event_queue: Rc<RefCell<VecDeque<Event>>>) -> CanvasRenderingContext2d {
-    let canvas = document().create_element("canvas")
-        .map_err(|_| ())
-        .and_then(|e| e.dyn_into::<HtmlCanvasElement>().map_err(|_| ()))
-        .expect("Failed to create canvas");
-
-    let context: CanvasRenderingContext2d = canvas
-        .get_context("2d")
-        .ok().flatten()
-        .and_then(|obj| obj.dyn_into::<CanvasRenderingContext2d>().ok())
-        .expect("No canvas 2d context?");
-
-    fn update(canvas: &HtmlCanvasElement, context: &CanvasRenderingContext2d, window: &Window) {
-        let ratio = window.device_pixel_ratio();
-        let width = window.inner_width().unwrap().as_f64().unwrap();
-        let height = window.inner_height().unwrap().as_f64().unwrap();
-        canvas.set_width((width * ratio) as u32);
-        canvas.set_height((height * ratio) as u32);
-
-        let style = format!("width: {}px; height: {}px;", width, height);
-        canvas.set_attribute("style", &style).unwrap();
-
-        context.scale(ratio, ratio).unwrap();
-
-        context.set_text_align("center");
-        context.set_text_baseline("middle");
-    }
-
-    let moved_window = window();
-    let moved_canvas = canvas.clone();
-    let moved_context = context.clone();
-    let on_resize = Closure::wrap(Box::new(move |_e| {
-        update(&moved_canvas, &moved_context, &moved_window);
-    }) as Box<dyn FnMut(web_sys::Event)>);
-
-    let w = window();
-    w.add_event_listener_with_callback("resize", on_resize.as_ref().unchecked_ref())
-        .unwrap();
-    on_resize.forget();
-
-    update(&canvas, &context, &w);
-
-    body().append_child(&canvas).expect("Failed to add canvas");
-
-    event::setup_events(&canvas, event_queue);
-
-    context
+fn compute_rem_to_pixel_ratio() -> f64 {
+    let window = window();
+    window
+        .get_computed_style(&document().document_element().unwrap())
+        .ok()
+        .flatten()
+        .and_then(|style| style.get_property_value("font-size").ok())
+        .as_deref()
+        .unwrap_or("")
+        .strip_suffix("px")
+        .unwrap_or("12")
+        .parse()
+        .unwrap_or(12.0)
+        * window.device_pixel_ratio()
 }
 
-#[derive(Clone)]
-pub struct Events(Rc<RefCell<VecDeque<Event>>>);
-
-impl Iterator for Events {
-    type Item = Event;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.0.borrow_mut().pop_back()
-    }
-}
-
-pub struct Context<'a, G: Game> {
-    game: &'a mut G,
-    delta_time: f64,
-    size: Point2<f32>,
-    surface: &'a CanvasRenderingContext2d,
-    audio_context: &'a AudioContext,
-}
-
-pub enum StateTransition<G> {
+#[derive(Debug)]
+pub enum StateTransition<G: Game> {
     None,
     Set(Box<dyn GameState<G>>),
     Push(Box<dyn GameState<G>>),
     Pop,
 }
 
+impl<G: Game> StateTransition<G> {
+    pub fn is_none(&self) -> bool {
+        match self {
+            StateTransition::None => true,
+            _ => false,
+        }
+    }
+
+    #[inline]
+    pub fn set<S: GameState<G>>(state: S) -> StateTransition<G> {
+        StateTransition::Set(Box::new(state))
+    }
+
+    #[inline]
+    pub fn push<S: GameState<G>>(state: S) -> StateTransition<G> {
+        StateTransition::Push(Box::new(state))
+    }
+}
+
+pub struct Context<'a, G: Game> {
+    delta_time: f64,
+    rem_to_px: f64,
+    surface: Mut<Surface>,
+    sound_context: Mut<SoundContext>,
+    storage: &'a mut G::Storage,
+    pub game: &'a mut G,
+}
+
 impl<'a, G: Game> Context<'a, G> {
-    pub fn game(&self) -> &G {
-        self.game
-    }
-
-    pub fn game_mut(&mut self) -> &mut G {
-        self.game
-    }
-
     pub fn delta_time(&self) -> f64 {
         self.delta_time
     }
 
-    pub fn size(&self) -> Point2<f32> {
-        self.size
+    pub fn rem_to_px(&self, rem: f64) -> f64 {
+        rem * self.rem_to_px
     }
 
-    pub fn surface(&self) -> &CanvasRenderingContext2d {
-        self.surface
+    pub fn surface(&self) -> Ref<Surface> {
+        self.surface.borrow()
     }
 
-    pub fn audio_context(&self) -> &AudioContext {
-        self.audio_context
+    pub fn sound_context_mut(&self) -> RefMut<SoundContext> {
+        self.sound_context.borrow_mut()
+    }
+
+    pub fn storage(&self) -> &G::Storage {
+        self.storage
+    }
+
+    pub fn set_storage(&mut self, new_storage: G::Storage) {
+        set_data(&new_storage);
+        *self.storage = new_storage;
     }
 }
 
-fn run<G: Game + 'static>() {
-    let event_queue = Rc::new(RefCell::new(VecDeque::new()));
+fn handle_transition<G: Game>(
+    stack: &mut Vec<Box<dyn GameState<G>>>,
+    mut trn: impl FnMut(&mut Box<dyn GameState<G>>, &mut Context<G>) -> StateTransition<G>,
+    mut context: Context<G>,
+) {
+    let mut next_transition = Some(trn(stack.last_mut().unwrap(), &mut context));
 
-    let surface = setup_canvas(event_queue.clone());
-    let audio_context = AudioContext::new().unwrap();
-    let canvas = surface.canvas().unwrap();
+    while let Some(transition) = next_transition.take() {
+        match transition {
+            StateTransition::Set(state) => {
+                let last = stack.last_mut().unwrap();
+                *last = state;
+                next_transition = Some(last.on_pushed(&mut context));
+            }
+            StateTransition::Push(state) => {
+                stack.push(state);
+                next_transition = Some(stack.last_mut().unwrap().on_pushed(&mut context));
+            }
+            StateTransition::Pop => {
+                let next = stack.pop().unwrap().on_popped(&mut context);
+                if let StateTransition::Push(_) = next {
+                    // noop
+                } else if stack.is_empty() {
+                    panic!("Popped the last state!");
+                }
+                next_transition = Some(next);
+            }
+            StateTransition::None => {}
+        }
+    }
+}
 
-    let mut state_stack = VecDeque::new();
+fn run<G: Game>() {
+    let event_queue = Mut::new(Vec::new());
+
+    let surface = Mut::new(Surface::new(event_queue.clone()));
+    let sound_context = Mut::new(SoundContext::new());
 
     let (mut game, current_state) = G::load(Resources {
         surface: surface.clone(),
-        audio_context: audio_context.clone(),
+        sound_context: sound_context.clone(),
     });
-    state_stack.push_front(current_state);
-    state_stack[0].on_pushed(&mut Context {
-        game: &mut game,
-        delta_time: 0.0,
-        size: [canvas.width() as f32, canvas.height() as f32].into(),
-        surface: &surface,
-        audio_context: &audio_context,
-    });
+    let mut storage = get_data();
+
+    let mut states = vec![current_state];
+    handle_transition(
+        &mut states,
+        |state, context| state.on_pushed(context),
+        Context {
+            delta_time: 0.0,
+            rem_to_px: compute_rem_to_pixel_ratio(),
+            surface: surface.clone(),
+            sound_context: sound_context.clone(),
+            game: &mut game,
+            storage: &mut storage,
+        },
+    );
 
     let mut last_time = time();
 
-    fn request_animation_frame(window: &Window, f: &Closure<dyn FnMut()>) {
-        window
-            .request_animation_frame(f.as_ref().unchecked_ref())
-            .unwrap();
-    }
-
     let window_moved = window();
 
-    let rc1 = Rc::new(RefCell::new(None));
+    let rc1: Mut<Option<Closure<dyn FnMut()>>> = Mut::new(None);
+    //       ^ well, Rust failed to get that type somehow due to request_animation_frame call
     let rc2 = rc1.clone();
 
     *rc1.borrow_mut() = Some(Closure::wrap(Box::new(move || {
-        surface.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0).unwrap();
-        let width = canvas.width() as f32;
-        let height = canvas.height() as f32;
+        surface
+            .borrow()
+            .context()
+            .set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+            .unwrap();
 
         let now = time();
 
-        let mut context = Context {
-            game: &mut game,
-            delta_time: now - last_time,
-            size: [width, height].into(),
-            surface: &surface,
-            audio_context: &audio_context,
-        };
-
-        let transition = loop {
-            if let Some(event) = event_queue.borrow_mut().pop_back() {
-                match state_stack[0].on_event(event, &mut context) {
-                    StateTransition::None => (),
-                    x => break x,
-                }
-            } else {
-                break state_stack[0].on_update(&mut context);
-            }
-        };
-
-        let mut transitions = vec![transition];
-
-        while let Some(transition) = transitions.pop() {
-            match transition {
-                StateTransition::Set(state) => {
-                    state_stack[0] = state;
-                    state_stack[0].on_pushed(&mut context);
-                }
-                StateTransition::Push(state) => {
-                    state_stack.push_front(state);
-                    state_stack[0].on_pushed(&mut context);
-                }
-                StateTransition::Pop => {
-                    let pop_trn = state_stack.pop_front().unwrap().on_popped(&mut context);
-                    match pop_trn {
-                        StateTransition::Push(_) => {}
-                        _ => {
-                            if state_stack.is_empty() {
-                                panic!("Popped the last state!");
-                            }
-                        }
+        handle_transition(
+            &mut states,
+            |state, context| loop {
+                if let Some(event) = event_queue.borrow_mut().pop() {
+                    match state.on_event(event, context) {
+                        StateTransition::None => (),
+                        x => break x,
                     }
-                    transitions.push(pop_trn);
+                } else {
+                    break state.on_update(context);
                 }
-                StateTransition::None => {}
-            }
-        }
+            },
+            Context {
+                delta_time: now - last_time,
+                rem_to_px: compute_rem_to_pixel_ratio(),
+                surface: surface.clone(),
+                sound_context: sound_context.clone(),
+                game: &mut game,
+                storage: &mut storage,
+            },
+        );
 
         last_time = now;
 
-        request_animation_frame(&window_moved, rc2.borrow().as_ref().unwrap());
+        window_moved
+            .request_animation_frame(rc2.borrow().as_ref().unwrap().as_ref().unchecked_ref())
+            .unwrap();
     }) as Box<dyn FnMut()>));
 
-    request_animation_frame(&window(), rc1.borrow().as_ref().unwrap());
+    window()
+        .request_animation_frame(rc1.borrow().as_ref().unwrap().as_ref().unchecked_ref())
+        .unwrap();
 }
 
 pub struct Resources {
-    surface: CanvasRenderingContext2d,
-    audio_context: AudioContext,
+    surface: Mut<Surface>,
+    sound_context: Mut<SoundContext>,
 }
 
 impl Resources {
@@ -265,18 +256,19 @@ impl Resources {
     }
 
     pub fn load_sound(&self, url: &str) -> Sound {
-        Sound::load(self.audio_context.clone(), url)
-    }
-
-    pub fn load_music(&self, url: &str) -> Music {
-        Music::load(url)
+        Sound::load(self.sound_context.clone(), url)
     }
 }
 
 // copying Amethyst so hard accidentaly
 // well their state design is pretty good I guess
-pub trait GameState<G: Game> where Self: 'static {
-    fn on_pushed(&mut self, _context: &mut Context<G>) {}
+pub trait GameState<G: Game>
+where
+    Self: Debug + 'static,
+{
+    fn on_pushed(&mut self, _context: &mut Context<G>) -> StateTransition<G> {
+        StateTransition::None
+    }
 
     fn on_event(&mut self, _event: Event, _context: &mut Context<G>) -> StateTransition<G> {
         StateTransition::None
@@ -286,17 +278,21 @@ pub trait GameState<G: Game> where Self: 'static {
         StateTransition::None
     }
 
-    #[allow(clippy::boxed_local)]
     fn on_popped(self: Box<Self>, _context: &mut Context<G>) -> StateTransition<G> {
         StateTransition::None
     }
 }
 
-pub trait Game where Self: Sized + 'static {
+pub trait Game
+where
+    Self: Debug + Sized + 'static,
+{
+    type Storage: Clone + Default + Serialize + for<'a> Deserialize<'a>;
+
     fn load(resources: Resources) -> (Self, Box<dyn GameState<Self>>);
 }
 
-pub trait GameRun: Game + Sized + private::Sealed {
+pub trait GameRun: Game + private::Sealed {
     fn run() {
         run::<Self>()
     }
@@ -306,6 +302,6 @@ mod private {
     pub trait Sealed {}
 }
 
-impl<G: Game + Sized> private::Sealed for G {}
+impl<G: Game> private::Sealed for G {}
 
-impl<G: Game + Sized + private::Sealed> GameRun for G {}
+impl<G: Game + private::Sealed> GameRun for G {}

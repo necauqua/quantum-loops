@@ -1,3 +1,3 @@
-import {main} from "game";
+import {main} from 'game';
 
 main();

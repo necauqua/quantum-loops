@@ -16,11 +16,11 @@
   },
   {
     "name": "THICK",
-    "energy": 205,
+    "energy": 210,
     "rings": [
       {
         "radius": 0.10,
-        "width": 25,
+        "width": 7,
         "color": "#4f2b59",
         "base_energy": 200
       }
@@ -91,34 +91,34 @@
     "energy": 500,
     "rings": [
       {
-        "radius": 0.005,
+        "radius": 0.01,
         "offset": [ -0.44832850166720906 , -0.41298507591804445 ],
         "base_energy": 60,
-        "restore_time": 5
+        "restore_time": 7
       },
       {
-        "radius": 0.005,
+        "radius": 0.01,
         "offset": [ 0.4074574319719 , 0.2530864763668884 ],
         "base_energy": 60,
-        "restore_time": 5
+        "restore_time": 7
       },
       {
-        "radius": 0.005,
+        "radius": 0.01,
         "offset": [ 0.40809086955279267 , 0.3115169511324731 ],
         "base_energy": 60,
-        "restore_time": 5
+        "restore_time": 7
       },
       {
-        "radius": 0.005,
+        "radius": 0.01,
         "offset": [ -0.3771381306668682 , 0.18202557616331524 ],
         "base_energy": 60,
-        "restore_time": 5
+        "restore_time": 7
       },
       {
-        "radius": 0.005,
+        "radius": 0.01,
         "offset": [ -0.20210451744786376 , 0.08904841203473615 ],
         "base_energy": 60,
-        "restore_time": 5
+        "restore_time": 7
       }
     ]
   },
